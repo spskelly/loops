@@ -1,5 +1,6 @@
 import { distance, destination, edgeKey } from './geo.js';
-const penalties = { footway: 1, pedestrian: 1, path: 1.08, living_street: 1.12, track: 1.2, residential: 1.3, unclassified: 1.5, tertiary: 1.85, steps: 1.8 };
+// ponytail: primary/secondary 2.5 is a placeholder above tertiary; retune if generated loops start hugging busy roads.
+const penalties = { footway: 1, pedestrian: 1, path: 1.08, living_street: 1.12, track: 1.2, residential: 1.3, unclassified: 1.5, tertiary: 1.85, steps: 1.8, secondary: 2.5, primary: 2.5 };
 const denied = new Set(['no', 'private', 'customers', 'delivery', 'permit', 'agricultural', 'forestry', 'destination', 'use_sidepath']);
 export function walkable(tags = {}) {
   if (!(tags.highway in penalties) || tags.area === 'yes' || tags.indoor === 'yes') return false;
@@ -170,21 +171,43 @@ function describe(graph, nodeIds) {
   };
 }
 
-// Join tapped points with walking paths, closing the loop back at the first point.
-export function traceRoute(elements, waypoints) {
-  const graph = buildGraph(elements);
-  const ids = waypoints.map((point, i) => {
-    const near = nearest(graph, point);
-    if (near.id === null || near.meters > (i ? 150 : 250)) throw new Error(i ? `Point ${i + 1} is too far from a mapped path. Move it closer to a street or trail.` : 'No mapped walking path within 250 m of your start.');
-    return near.id;
-  }).filter((id, i, all) => i === 0 || id !== all[i - 1]);
-  if (ids.at(-1) !== ids[0]) ids.push(ids[0]);
-  if (ids.length < 3) throw new Error('Add at least one point away from the start.');
-  const nodeIds = [ids[0]];
-  for (let i = 1; i < ids.length; i++) {
-    const leg = path(shortestPaths(graph, ids[i - 1], ids[i]), ids[i - 1], ids[i]);
-    if (!leg) throw new Error(`No walking path reaches point ${i + 1}. Try a point on a connected street.`);
-    nodeIds.push(...leg.nodes.slice(1));
+// Closest approach to a segment on a local flat projection; accurate at street scale.
+function segmentDistance(point, a, b) {
+  const kx = Math.cos(point[1] * Math.PI / 180) * 111320, ky = 110540;
+  const ax = (a[0] - point[0]) * kx, ay = (a[1] - point[1]) * ky, dx = (b[0] - point[0]) * kx - ax, dy = (b[1] - point[1]) * ky - ay;
+  const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
+  return { meters: Math.hypot(ax + t * dx, ay + t * dy), t };
+}
+// Nearest walkable segment; `along` is the walking distance from each end to the closest point.
+export function nearestEdge(graph, coord) {
+  let best = { ends: null, meters: Infinity, along: null };
+  for (const [from, edges] of graph.adjacency) for (const edge of edges) {
+    const hit = segmentDistance(coord, graph.nodes.get(from), graph.nodes.get(edge.to));
+    if (hit.meters < best.meters) best = { ends: [from, edge.to], meters: hit.meters, along: [hit.t * edge.length, (1 - hit.t) * edge.length] };
   }
-  return { ...describe(graph, nodeIds), startOffset: nearest(graph, waypoints[0]).meters, drawn: true };
+  return best;
+}
+// Join tapped points with walking paths, closing the loop back at the first point.
+// Taps snap to the nearest walkable segment, not node: node snapping sent mid-block taps to nearby
+// dead ends and the route wandered there and back. Each leg walks to the end of that segment nearest
+// the tap; path cost only breaks ties. ponytail: blend in path cost if long detours to a near end show up.
+export function traceRoute(elements, waypoints) {
+  const graph = buildGraph(elements), start = nearest(graph, waypoints[0]);
+  if (start.id === null || start.meters > 250) throw new Error('No mapped walking path within 250 m of your start.');
+  const stops = waypoints.slice(1).map((point, i) => {
+    const edge = nearestEdge(graph, point);
+    if (edge.meters > 60) throw new Error(`Point ${i + 2} is not on a mapped walking path. Move it onto a street or trail.`);
+    return edge;
+  });
+  stops.push({ ends: [start.id, start.id], along: [0, 0] });
+  const nodeIds = [start.id];
+  for (const [i, { ends, along }] of stops.entries()) {
+    // ponytail: a full shortest-path tree per leg; add a two-target early exit if large graphs feel slow.
+    const from = nodeIds.at(-1), tree = shortestPaths(graph, from);
+    const to = ends.map((id, j) => [id, along[j], tree.costs.get(id)]).filter(([, , cost]) => Number.isFinite(cost)).sort((a, b) => a[1] - b[1] || a[2] - b[2])[0]?.[0];
+    if (to === undefined) throw new Error(`No walking path reaches ${i < stops.length - 1 ? `point ${i + 2}` : 'your start'} from the previous point. Try a point on a connected street.`);
+    nodeIds.push(...path(tree, from, to).nodes.slice(1));
+  }
+  if (nodeIds.length < 3) throw new Error('Add at least one point away from the start.');
+  return { ...describe(graph, nodeIds), startOffset: start.meters, drawn: true };
 }

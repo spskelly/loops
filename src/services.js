@@ -32,10 +32,10 @@ export async function geocode(query, signal) {
 export async function fetchGraph(origin, target, signal) {
   const center = origin.map(n => Math.round(n * 100) / 100);
   const radius = Math.ceil((target / 2 + 400 + distance(center, origin)) / 1000) * 1000;
-  const key = `graph:v2:${center.join(',')}:${radius}`;
+  const key = `graph:v3:${center.join(',')}:${radius}`;
   const cached = await getCache(key); if (cached) return cached;
   const settings = await config();
-  const query = `[out:json][timeout:45][maxsize:33554432];way(around:${radius},${center[1]},${center[0]})["highway"~"^(footway|path|residential|living_street|pedestrian|track|unclassified|tertiary|steps)$"];(._;>;);out body;`;
+  const query = `[out:json][timeout:45][maxsize:33554432];way(around:${radius},${center[1]},${center[0]})["highway"~"^(footway|path|residential|living_street|pedestrian|track|unclassified|tertiary|secondary|primary|steps)$"];(._;>;);out body;`;
   const data = await fetchJSON(settings.overpass, { method: 'POST', body: new URLSearchParams({ data: query }), signal }, 55000);
   if (data.remark) throw new Error('The map query could not finish. Try a shorter distance or try again later.');
   if (!data.elements?.length) throw new Error('No walking paths found here. Try another starting point.');
