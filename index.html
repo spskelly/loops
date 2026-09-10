@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#244d3d"><meta name="description" content="Find a good walk, right from your doorstep. Simple walking loops with elevation and a little room to grow.">
+  <title>Loops — a little more outside</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+  <script type="module" src="./src/app.js"></script>
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="./" aria-label="Loops home"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M19 9C7-1 0 19 10 24c8 4 14-15 21-10 13 9-6 26-15 15"/><circle cx="17" cy="9" r="3"/></svg>loops<span>a little more outside</span></a>
+    <button class="history-toggle quiet" id="history-open"><span aria-hidden="true">◷</span> Your walks <span id="history-count" class="count">0</span></button>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="intro"><div class="eyebrow"><span class="green-dot"></span> THE LONG WAY HOME</div><h1>Same doorstep.<br>New possibilities.</h1><p>A good walk starts where you are.<br> Let’s find your next loop.</p></div>
+      <form id="planner">
+        <fieldset id="controls">
+          <label for="address" class="field-label">01 <span>Where are we starting?</span></label>
+          <div class="address-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><input id="address" placeholder="Address, park, or neighborhood" autocomplete="off" maxlength="200" aria-label="Starting address, park, or neighborhood" aria-describedby="place-status" aria-controls="places" aria-expanded="false"><button type="button" id="search" aria-label="Search places">Search</button></div>
+          <div id="places" class="places" hidden></div>
+          <div id="place-status" class="place-status" role="status" aria-live="polite">Type a place, then choose a match to move the map.</div>
+          <div class="location-actions"><button type="button" id="locate" class="text-button"><span aria-hidden="true">⌖</span> Use my location</button><button type="button" id="save-location" class="text-button" disabled>☆ Save this start</button></div>
+          <div id="location-status" class="place-status" role="status" aria-live="polite"></div>
+          <details id="location-diagnostics" hidden><summary>Location details</summary><pre id="location-log"></pre></details>
+          <div id="saved-locations" class="saved-locations" hidden><select id="saved-location" aria-label="Saved starting locations"><option value="">Saved starting points</option></select><button id="remove-location" type="button" class="text-button" hidden>Remove</button></div>
+          <div class="distance-heading"><label for="distance" class="field-label">02 <span>How far feels good?</span></label><div class="units" aria-label="Distance units"><button type="button" data-unit="mi" aria-pressed="true">mi</button><button type="button" data-unit="km" aria-pressed="false">km</button></div></div>
+          <div class="distance-readout"><output for="distance" id="distance-value">2.0</output><span id="distance-unit">miles</span><span id="walk-time">~40 min walking</span></div>
+          <input type="range" id="distance" min="0.5" max="6" step="0.1" value="2" aria-label="Target distance">
+          <div class="range-labels"><span id="range-min">A quick breather</span><span>A proper wander</span></div>
+          <label class="field-label effort-label">03 <span>Set your pace</span></label>
+          <div class="efforts" role="group" aria-label="Terrain preference">
+            <button type="button" data-effort="gentle" aria-pressed="true"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M2 19c12 0 15-10 23-7s8 5 13 5"/></svg><strong>Easygoing</strong><small>Keep it gentle</small></button>
+            <button type="button" data-effort="balanced" aria-pressed="false"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="m2 20 12-13 10 10 6-6 8 9"/></svg><strong>A little more</strong><small>A few hills</small></button>
+            <button type="button" data-effort="challenge" aria-pressed="false"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="m2 20 10-13 6 6 9-12 11 19M23 7l4 2 3-3"/></svg><strong>Stretch out</strong><small>Embrace the climb</small></button>
+          </div>
+          <button type="submit" class="primary find" id="find">Find my loops <span aria-hidden="true">↗</span></button>
+        </fieldset>
+      </form>
+      <div id="status" role="status" aria-live="polite"></div><button id="cancel" class="text-button" hidden>Cancel search</button>
+      <section id="results" hidden aria-label="Suggested loops"><div class="section-heading"><h2>Your way around</h2><span id="route-count"></span></div><div id="route-list"></div></section>
+      <div id="next-walk" class="next-walk" hidden></div>
+      <footer class="sidebar-footer"><span class="little-loop">↬</span><p>A change of scenery. A clearer head.<br>All the way back to you.</p></footer>
+    </aside>
+    <section class="map-panel" aria-label="Walking route map">
+      <div id="map"></div>
+      <div class="map-tag"><span class="green-dot"></span><span id="map-label">A little exploration starts here</span></div>
+      <div class="map-welcome" id="map-welcome"><div class="compass-art" aria-hidden="true"><span>N</span><svg viewBox="0 0 160 160"><circle cx="80" cy="80" r="63"/><circle cx="80" cy="80" r="48"/><path d="M80 8v20M80 132v20M8 80h20M132 80h20"/><path class="needle" d="m98 42-9 47-27 29 9-47Z"/><circle cx="80" cy="80" r="5"/></svg></div><div class="eyebrow">THERE’S MORE AROUND THE CORNER</div><h2>Make room for<br>a little wandering.</h2><p>Pick a starting point and we’ll connect<br>the paths into something worth stepping out for.</p><button id="example" class="example">Explore an example in Central Park <span>↗</span></button><small>Or click anywhere on the map to start there.</small></div>
+      <button id="fit-map" class="fit-map" hidden>⌖ &nbsp; Fit loop</button>
+      <section id="route-detail" class="route-detail" hidden aria-label="Selected route details"></section>
+      <div id="map-error" class="map-error" hidden>Map unavailable. You can still search for loops and download a GPX.</div>
+      <div class="map-footnote">Follow local signs and access rules. Routes use community map data.</div>
+    </section>
+  </main>
+  <dialog id="history-dialog"><div class="dialog-heading"><div><div class="eyebrow">ONE STEP AT A TIME</div><h2>Your walks</h2></div><button id="history-close" class="icon-button" aria-label="Close walk history">×</button></div><p class="muted">Small outings add up. Your history stays on this device.</p><div id="history-list"></div><button id="clear-history" class="text-button" hidden>Clear walk history</button></dialog>
+  <dialog id="save-location-dialog"><form id="save-location-form"><div class="dialog-heading"><h2>Save your starting point</h2><button type="button" id="save-location-close" class="icon-button" aria-label="Close save location">×</button></div><label for="location-name" class="field-label"><span>Give it a name</span></label><input id="location-name" class="location-name" required maxlength="80" placeholder="Home, work, favorite park"><label class="default-location"><input type="checkbox" id="location-default" checked> Start here when I open Loops</label><p class="muted">Saved only in this browser, on this device.</p><div id="save-location-error" class="place-status error" role="status"></div><button class="primary" id="save-location-submit" type="submit">Save starting point</button></form></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

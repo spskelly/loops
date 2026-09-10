@@ -1,0 +1,6 @@
+{
+  "name": "loops", "version": "0.1.0", "private": true, "type": "module",
+  "description": "A little more outside. Browser-only walking loop planner.",
+  "scripts": { "start": "node server.mjs", "dev": "node server.mjs", "test": "node --test tests/core.test.mjs" },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,6 @@
+{
+  "geocoder": "https://photon.komoot.io/api/",
+  "overpass": "https://overpass-api.de/api/interpreter",
+  "terrain": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium",
+  "mapTiles": "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+}
