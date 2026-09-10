@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { distance, destination, resample, elevationGain, equivalentDistance, toGPX, reverseRoute, startingDirection } from '../src/geo.js';
-import { walkable, buildGraph, shortestPaths, generateLoops, rerouteSection, traceRoute, jaccard } from '../src/routing.js';
+import { walkable, buildGraph, shortestPaths, nearest, generateLoops, rerouteSection, traceRoute, jaccard } from '../src/routing.js';
 import { currentLocation } from '../src/location.js';
 import { decodeTerrarium, mercatorPixel } from '../src/services.js';
 
@@ -222,4 +222,24 @@ test('drawn routes snap waypoints to the graph and connect them with walking pat
   assert.throws(() => traceRoute(elements, [[0, 0], [10, 10]]), /Point 2/);
   assert.throws(() => traceRoute(elements, [[0, 0]]), /at least one/);
   assert.throws(() => traceRoute(elements, [[0, 0], [.00001, 0]]), /at least one/);
+});
+test('mid-block taps snap to the street segment, not a nearby dead-end node', () => {
+  // A dead-end footway tip 50 m from the tap; the nearest street nodes are 58 m away but the street line is 17 m away.
+  const elements = [...grid(), { type: 'node', id: 999, lon: .0025, lat: .0006 }, { type: 'way', id: 30000, nodes: [147, 999], tags: { highway: 'footway' } }];
+  const graph = buildGraph(elements);
+  assert.equal(nearest(graph, [.0025, .00015]).id, 999, 'node snapping would have chosen the dead end');
+  const route = traceRoute(elements, [[0, 0], [.0025, .00015], [.003, .003], [0, .003]]);
+  assert.ok(!route.nodeIds.includes(999), 'route must not detour to the dead end');
+  assert.ok(route.nodeIds.includes(147), 'route enters the tapped street at its near end');
+  // A tap exactly on a corner reaches that corner rather than stopping a block short.
+  const corner = traceRoute(elements, [[0, 0], [.002, 0], [.002, .002], [0, .002]]);
+  assert.ok(corner.nodeIds.includes(147) && corner.nodeIds.includes(181));
+});
+test('busy roads are walkable at a high penalty so drawn routes can follow their sidewalks', () => {
+  assert.equal(walkable({ highway: 'primary' }), true);
+  assert.equal(walkable({ highway: 'secondary', sidewalk: 'both' }), true);
+  assert.equal(walkable({ highway: 'trunk' }), false);
+  const graph = buildGraph([{ type: 'node', id: 1, lon: 0, lat: 0 }, { type: 'node', id: 2, lon: .001, lat: 0 }, { type: 'way', id: 1, nodes: [1, 2], tags: { highway: 'primary' } }]);
+  const edge = graph.adjacency.get(1)[0];
+  assert.ok(edge.weight > edge.length * 2 && !edge.quiet);
 });
