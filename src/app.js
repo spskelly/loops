@@ -1,11 +1,11 @@
-import { equivalentDistance, toGPX, reverseRoute, startingDirection } from './geo.js';
-import { config, geocode, fetchGraph, calculateRoutes, calculateDetour, addElevation } from './services.js';
+import { distance, equivalentDistance, toGPX, reverseRoute, startingDirection } from './geo.js';
+import { config, geocode, fetchGraph, calculateRoutes, calculateDetour, calculateDrawn, addElevation } from './services.js';
 import { getWalks, saveWalk, deleteWalk, clearWalks, getLocations, saveLocation, deleteLocation, getDefaultLocation, setDefaultLocation } from './storage.js';
 import { currentLocation } from './location.js';
 
 const $ = id => document.getElementById(id);
 const colors = ['#355f46', '#b78646', '#7287a0'];
-const state = { unit: 'mi', effort: 'gentle', origin: null, placeName: '', query: '', routes: [], selected: 0, walks: [], busy: false, controller: null, map: null, marker: null, nextTarget: null, locations: [], defaultLocation: null, graph: null, editMode: false, pendingEdge: null, editMarker: null };
+const state = { unit: 'mi', effort: 'gentle', origin: null, placeName: '', query: '', routes: [], selected: 0, walks: [], busy: false, controller: null, map: null, marker: null, nextTarget: null, locations: [], defaultLocation: null, graph: null, editMode: false, pendingEdge: null, editMarker: null, drawing: false, waypoints: [], drawMarkers: [] };
 const factor = () => state.unit === 'mi' ? 1609.344 : 1000;
 const meters = () => Number($('distance').value) * factor();
 const formatDistance = n => `${(n / factor()).toFixed(1)} ${state.unit}`;
@@ -22,7 +22,8 @@ function updateDistance() {
 }
 function busy(value) {
   state.busy = value; $('controls').disabled = value; $('cancel').hidden = !value;
-  $('example').disabled = value;
+  $('example').disabled = value; $('draw').disabled = value; $('draw-cancel').disabled = value;
+  $('draw-undo').disabled = value || !state.waypoints.length; $('draw-finish').disabled = value || !state.waypoints.length;
   $('find').innerHTML = value ? 'Finding your way around… <span>↻</span>' : 'Find my loops <span aria-hidden="true">↗</span>';
   $('planner').setAttribute('aria-busy', String(value));
   $('route-detail').querySelectorAll('button').forEach(button => button.disabled = value || (button.id === 'reverse' && state.routes[state.selected]?.reversible === false) || (button.id === 'complete' && state.walks.some(w => w.routeId === state.routes[state.selected]?.id)));
@@ -50,7 +51,7 @@ function showStartingPoint() {
   state.map.flyTo({ center: state.origin, zoom: 14, padding: { top: 0, bottom: 0, left: 0, right: 0 }, duration: 800 });
 }
 function clearRoutes() {
-  resetRouteEditor();
+  resetRouteEditor(); stopDrawing();
   state.routes = []; $('results').hidden = true; $('route-detail').hidden = true; $('fit-map').hidden = true;
   $('route-list').replaceChildren();
   updateMapRoutes();
@@ -143,8 +144,8 @@ async function findLoops(event) {
 }
 function renderRoutes() {
   $('results').hidden = !state.routes.length;
-  $('route-count').textContent = `${state.routes.length} possibilities`;
-  $('route-list').innerHTML = state.routes.map((route, i) => `<button type="button" class="route-card" data-route="${i}" aria-pressed="${i === state.selected}" style="--route-color:${colors[i]}"><span class="route-top"><span class="route-dot"></span><strong>${escape(route.name)}</strong><small>${i === 0 ? 'BEST FIT' : 'ALTERNATIVE'}</small></span><span class="route-stats"><span>${formatDistance(route.length)}</span><span>↗ ${formatGain(route.gain)}</span><span>~${minutes(route)} min</span></span></button>`).join('');
+  $('route-count').textContent = `${state.routes.length} ${state.routes.length === 1 ? 'possibility' : 'possibilities'}`;
+  $('route-list').innerHTML = state.routes.map((route, i) => `<button type="button" class="route-card" data-route="${i}" aria-pressed="${i === state.selected}" style="--route-color:${colors[i]}"><span class="route-top"><span class="route-dot"></span><strong>${escape(route.name)}</strong><small>${route.drawn ? 'YOUR ROUTE' : i === 0 ? 'BEST FIT' : 'ALTERNATIVE'}</small></span><span class="route-stats"><span>${formatDistance(route.length)}</span><span>↗ ${formatGain(route.gain)}</span><span>~${minutes(route)} min</span></span></button>`).join('');
   $('route-list').querySelectorAll('button').forEach(b => b.onclick = () => selectRoute(Number(b.dataset.route), true));
 }
 function profileSVG(route) {
@@ -234,6 +235,59 @@ async function editRoute(edgeIndex, destination) {
     if (!controller.signal.aborted) { $('edit-hint').textContent = friendlyError(error); status(friendlyError(error), true); toast('Could not make that detour. Your loop is unchanged.'); }
   } finally { if (state.controller === controller) busy(false); }
 }
+// ponytail: the dashed preview is straight lines; real walking paths are computed once on Finish.
+function stopDrawing() {
+  state.drawing = false; state.waypoints = [];
+  state.drawMarkers.forEach(m => m.remove()); state.drawMarkers = [];
+  $('draw-bar').hidden = true; $('draw').setAttribute('aria-pressed', 'false');
+  state.map?.getSource('edit-preview')?.setData({ type: 'FeatureCollection', features: [] });
+  state.map?.getCanvas().style.setProperty('cursor', '');
+}
+function renderDrawing() {
+  const count = state.waypoints.length;
+  $('draw-undo').disabled = !count; $('draw-finish').disabled = !count;
+  $('draw-hint').textContent = count ? `${count} ${count === 1 ? 'point' : 'points'} added. Tap to add more, or finish to connect them by walking paths.` : 'Tap the map to add points. The loop closes back at your start.';
+  state.drawMarkers.forEach(m => m.remove());
+  state.drawMarkers = state.waypoints.map((coord, i) => {
+    const element = document.createElement('div'); element.className = 'draw-pin'; element.textContent = i + 1;
+    return new maplibregl.Marker({ element }).setLngLat(coord).addTo(state.map);
+  });
+  state.map.getSource('edit-preview')?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [state.origin, ...state.waypoints, state.origin] } });
+}
+function startDrawing() {
+  if (state.busy) return;
+  if (state.drawing) { stopDrawing(); status('Drawing cancelled.'); return; }
+  if (!state.origin || !state.map) { status(state.map ? 'Choose a starting point first, then draw your route from there.' : 'The map is unavailable, so routes cannot be drawn.', true); $('address').focus(); return; }
+  cancelPlaceSearch(); cancelLocation(); clearRoutes();
+  state.drawing = true; $('draw-bar').hidden = false; $('draw').setAttribute('aria-pressed', 'true');
+  $('map-welcome').hidden = true; renderDrawing();
+  state.map.getCanvas().style.setProperty('cursor', 'crosshair');
+  status('Tap the map to add points along your walk.');
+  if (window.innerWidth <= 720) $('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function finishDrawing() {
+  if (state.busy || !state.waypoints.length) return;
+  const origin = state.origin, waypoints = [origin, ...state.waypoints];
+  const controller = new AbortController(); state.controller = controller;
+  busy(true); status('Gathering nearby paths and quiet streets…');
+  try {
+    // Load at least the slider's radius, and enough to cover the farthest point.
+    state.graph = await fetchGraph(origin, Math.max(meters(), 2 * Math.max(...waypoints.map(p => distance(origin, p)))), controller.signal);
+    if (controller.signal.aborted) return;
+    status('Connecting your points by walking paths…');
+    let route = await calculateDrawn(state.graph, waypoints, controller.signal);
+    if (controller.signal.aborted) return;
+    status('Checking the hills along the way…');
+    try { [route] = await addElevation([route], controller.signal, () => {}); } catch (error) { if (controller.signal.aborted) throw error; }
+    if (controller.signal.aborted) return;
+    stopDrawing();
+    state.routes = [{ ...route, name: 'Your own way', id: crypto.randomUUID(), placeName: state.placeName }];
+    state.selected = 0; renderRoutes(); selectRoute(0, true);
+    status(`Your route is ${formatDistance(route.length)} following mapped paths. Drag the line to adjust any street.`);
+    if (window.innerWidth <= 720) $('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) { if (!controller.signal.aborted) status(friendlyError(error), true); }
+  finally { if (state.controller === controller) busy(false); }
+}
 let ignoreMapClickUntil = 0, ignoredMapClickPoint;
 function installRouteDragging(map) {
   let drag = null;
@@ -306,6 +360,10 @@ async function initMap() {
     map.on('idle', () => { if (map.areTilesLoaded()) $('map-error').hidden = true; });
     map.on('click', event => {
       if (state.busy || (Date.now() < ignoreMapClickUntil && ignoredMapClickPoint && Math.hypot(event.point.x - ignoredMapClickPoint.x, event.point.y - ignoredMapClickPoint.y) < 8)) return;
+      if (state.drawing) {
+        if (Math.abs(event.lngLat.lat) > 85) return;
+        const point = event.lngLat.wrap(); state.waypoints.push([point.lng, point.lat]); renderDrawing(); return;
+      }
       if (state.editMode) {
         if (state.pendingEdge !== null) { editRoute(state.pendingEdge, [event.lngLat.lng, event.lngLat.lat]); return; }
         const edge = closestRouteSegment(event.point);
@@ -468,9 +526,12 @@ $('remove-location').onclick = async () => {
   try { await deleteLocation(id); if (id === state.defaultLocation) await setDefaultLocation(null); await loadSavedLocations(); toast('Saved starting point removed.'); }
   catch { locationStatus('Could not remove this saved location.', true); }
 };
-$('cancel').onclick = () => { state.controller?.abort(); resetRouteEditor(); busy(false); if ($('edit-hint')) $('edit-hint').textContent = 'Edit cancelled. Your loop is unchanged.'; status('Search cancelled. Ready when you are.'); };
+$('cancel').onclick = () => { state.controller?.abort(); resetRouteEditor(); stopDrawing(); busy(false); if ($('edit-hint')) $('edit-hint').textContent = 'Edit cancelled. Your loop is unchanged.'; status('Search cancelled. Ready when you are.'); };
 $('example').onclick = () => { setPlace({ coord: [-73.9819, 40.7681], name: 'Central Park · Columbus Circle' }); findLoops(); };
 $('fit-map').onclick = fitMap;
+$('draw').onclick = startDrawing; $('draw-cancel').onclick = () => { stopDrawing(); status('Drawing cancelled.'); };
+$('draw-undo').onclick = () => { state.waypoints.pop(); renderDrawing(); };
+$('draw-finish').onclick = finishDrawing;
 $('history-open').onclick = () => { renderHistory(); $('history-dialog').showModal(); };
 $('history-close').onclick = () => $('history-dialog').close();
 $('history-dialog').onclick = event => { if (event.target === $('history-dialog')) { const rect = $('history-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('history-dialog').close(); } };

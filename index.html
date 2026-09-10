@@ -39,6 +39,7 @@
             <button type="button" data-effort="challenge" aria-pressed="false"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="m2 20 10-13 6 6 9-12 11 19M23 7l4 2 3-3"/></svg><strong>Stretch out</strong><small>Embrace the climb</small></button>
           </div>
           <button type="submit" class="primary find" id="find">Find my loops <span aria-hidden="true">↗</span></button>
+          <button type="button" id="draw" class="text-button draw-link" aria-pressed="false">✎ Or draw your own route on the map</button>
         </fieldset>
       </form>
       <div id="status" role="status" aria-live="polite"></div><button id="cancel" class="text-button" hidden>Cancel search</button>
@@ -51,6 +52,7 @@
       <div class="map-tag"><span class="green-dot"></span><span id="map-label">A little exploration starts here</span></div>
       <div class="map-welcome" id="map-welcome"><div class="compass-art" aria-hidden="true"><span>N</span><svg viewBox="0 0 160 160"><circle cx="80" cy="80" r="63"/><circle cx="80" cy="80" r="48"/><path d="M80 8v20M80 132v20M8 80h20M132 80h20"/><path class="needle" d="m98 42-9 47-27 29 9-47Z"/><circle cx="80" cy="80" r="5"/></svg></div><div class="eyebrow">THERE’S MORE AROUND THE CORNER</div><h2>Make room for<br>a little wandering.</h2><p>Pick a starting point and we’ll connect<br>the paths into something worth stepping out for.</p><button id="example" class="example">Explore an example in Central Park <span>↗</span></button><small>Or click anywhere on the map to start there.</small></div>
       <button id="fit-map" class="fit-map" hidden>⌖ &nbsp; Fit loop</button>
+      <div id="draw-bar" class="draw-bar" hidden><span id="draw-hint" role="status" aria-live="polite">Tap the map to add points. The loop closes back at your start.</span><button type="button" id="draw-undo" class="secondary" disabled>Undo point</button><button type="button" id="draw-finish" class="primary" disabled>Finish loop</button><button type="button" id="draw-cancel" class="text-button">Cancel</button></div>
       <section id="route-detail" class="route-detail" hidden aria-label="Selected route details"></section>
       <div id="map-error" class="map-error" hidden>Map unavailable. You can still search for loops and download a GPX.</div>
       <div class="map-footnote">Follow local signs and access rules. Routes use community map data.</div>

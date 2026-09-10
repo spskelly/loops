@@ -49,6 +49,10 @@ export async function calculateDetour(elements, route, edgeIndex, destination, s
   const routes = await routingJob({ elements, edit: { route, edgeIndex, destination } }, signal, () => {});
   return routes[0];
 }
+export async function calculateDrawn(elements, waypoints, signal) {
+  const routes = await routingJob({ elements, draw: waypoints }, signal, () => {});
+  return routes[0];
+}
 function routingJob(payload, signal, onProgress) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./route-worker.js', import.meta.url), { type: 'module' });

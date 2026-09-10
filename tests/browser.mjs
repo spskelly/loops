@@ -206,6 +206,41 @@ try {
   assert.deepEqual(await selectedCoords(), beforeEdit);
   console.log('PASS: dragging reroutes a street through connected paths; undo restores the original loop');
 
+  // Draw a route: tap two grid corners, undo one, add it back, then finish.
+  await page.locator('#draw').click();
+  await page.waitForFunction(() => !document.getElementById('draw-bar').hidden);
+  assert.equal(await page.locator('#results').isVisible(), false);
+  const drawPoints = await page.evaluate(([lng, lat]) => {
+    const map = window.testMap; map.jumpTo({ center: [lng + .0013, lat + .001], zoom: 15.5, padding: { top: 0, bottom: 0, left: 0, right: 0 } });
+    const box = document.getElementById('map').getBoundingClientRect();
+    return [[lng + .0026, lat], [lng + .0026, lat + .002]].map(coord => { const p = map.project(coord); return [box.x + p.x, box.y + p.y]; });
+  }, origin);
+  await page.mouse.click(...drawPoints[0]); await page.mouse.click(...drawPoints[1]);
+  await page.waitForFunction(() => document.querySelectorAll('.draw-pin').length === 2);
+  await page.locator('#draw-undo').click();
+  await page.waitForFunction(() => document.querySelectorAll('.draw-pin').length === 1);
+  await page.mouse.click(...drawPoints[1]);
+  await page.waitForFunction(() => document.querySelectorAll('.draw-pin').length === 2);
+  await page.screenshot({ path: '.artifacts/drawing-route.png', fullPage: true });
+  await page.locator('#draw-finish').click();
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('Your route is'), null, { timeout: 30000 });
+  assert.equal(await page.locator('.draw-pin').count(), 0);
+  assert.equal(await page.locator('#draw-bar').isVisible(), false);
+  assert.equal(await page.locator('.route-card').count(), 1);
+  assert.ok((await page.locator('.route-card').innerText()).includes('YOUR ROUTE'));
+  const drawn = await selectedCoords();
+  assert.deepEqual(drawn[0], drawn.at(-1));
+  assert.ok(Math.abs(drawn[0][0] - origin[0]) < .0007 && Math.abs(drawn[0][1] - origin[1]) < .0006);
+  assert.ok(drawn.some(([x, y]) => Math.abs(x - (origin[0] + .0026)) < .0001 && Math.abs(y - (origin[1] + .002)) < .0001));
+  assert.ok((await page.locator('#route-detail').innerText()).includes('ROUND TRIP'));
+  await page.screenshot({ path: '.artifacts/drawn-route.png', fullPage: true });
+  await page.locator('#draw').click();
+  await page.waitForFunction(() => !document.getElementById('draw-bar').hidden);
+  await page.locator('#draw-cancel').click();
+  await page.waitForFunction(() => document.getElementById('draw-bar').hidden);
+  assert.equal(await page.locator('#find').isDisabled(), false);
+  console.log('PASS: drawing points, undo, finishing into a closed walking route, and cancelling');
+
   await page.locator('#save-location').click();
   await page.locator('#location-name').fill('Home');
   await page.locator('#location-default').check();

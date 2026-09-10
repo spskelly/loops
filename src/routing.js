@@ -146,19 +146,45 @@ export function rerouteSection(elements, route, edgeIndex, destinationCoord) {
   const second = path(shortestPaths(graph, target.id, ids[right], kept, budget), target.id, ids[right]);
   if (!second) throw new Error('No walkable detour returns to your loop from there. Try another nearby street.');
   const nodeIds = [...ids.slice(0, left), ...first.nodes, ...second.nodes.slice(1), ...ids.slice(right + 1)];
+  const summary = describe(graph, nodeIds);
+  if (!summary) throw new Error('This detour crosses a restricted segment. Try another street.');
+  if (summary.overlap > .4 || summary.length > Math.max(route.length * 2, route.length + 2000)) throw new Error('That detour would add too much retracing or distance. Try a closer street.');
+  return { ...route, ...summary, avoidedEdges: [...avoidedEdges], edited: true, editPoint: graph.nodes.get(target.id) };
+}
+
+// Route statistics for a walk along graph nodes; null if any step is not a graph edge.
+function describe(graph, nodeIds) {
   const edges = nodeIds.slice(1).map((id, i) => graph.adjacency.get(nodeIds[i])?.find(e => e.to === id));
-  if (edges.some(e => !e)) throw new Error('This detour crosses a restricted segment. Try another street.');
+  if (edges.some(e => !e)) return null;
   const length = edges.reduce((sum, e) => sum + e.length, 0);
   const unique = new Map(edges.map(e => [e.key, e.length]));
-  const overlap = 1 - [...unique.values()].reduce((sum, n) => sum + n, 0) / length;
-  if (overlap > .4 || length > Math.max(route.length * 2, route.length + 2000)) throw new Error('That detour would add too much retracing or distance. Try a closer street.');
   const names = new Map(); for (const e of edges) if (e.name) names.set(e.name, (names.get(e.name) || 0) + e.length);
   return {
-    ...route, nodeIds, coords: nodeIds.map(id => graph.nodes.get(id)), length, overlap,
+    nodeIds, coords: nodeIds.map(id => graph.nodes.get(id)), length,
+    overlap: 1 - [...unique.values()].reduce((sum, n) => sum + n, 0) / length,
     quiet: edges.reduce((sum, e) => sum + (e.quiet ? e.length : 0), 0) / length,
-    steps: edges.some(e => e.steps), edgeKeys: [...unique.keys()], avoidedEdges: [...avoidedEdges],
+    steps: edges.some(e => e.steps), edgeKeys: [...unique.keys()],
     reversible: nodeIds.slice(1).every((id, i) => graph.adjacency.get(id)?.some(e => e.to === nodeIds[i])),
     via: [...names].sort((a, b) => b[1] - a[1])[0]?.[0] || '',
-    gain: null, profile: null, edited: true, editPoint: graph.nodes.get(target.id),
+    gain: null, profile: null,
   };
+}
+
+// Join tapped points with walking paths, closing the loop back at the first point.
+export function traceRoute(elements, waypoints) {
+  const graph = buildGraph(elements);
+  const ids = waypoints.map((point, i) => {
+    const near = nearest(graph, point);
+    if (near.id === null || near.meters > (i ? 150 : 250)) throw new Error(i ? `Point ${i + 1} is too far from a mapped path. Move it closer to a street or trail.` : 'No mapped walking path within 250 m of your start.');
+    return near.id;
+  }).filter((id, i, all) => i === 0 || id !== all[i - 1]);
+  if (ids.at(-1) !== ids[0]) ids.push(ids[0]);
+  if (ids.length < 3) throw new Error('Add at least one point away from the start.');
+  const nodeIds = [ids[0]];
+  for (let i = 1; i < ids.length; i++) {
+    const leg = path(shortestPaths(graph, ids[i - 1], ids[i]), ids[i - 1], ids[i]);
+    if (!leg) throw new Error(`No walking path reaches point ${i + 1}. Try a point on a connected street.`);
+    nodeIds.push(...leg.nodes.slice(1));
+  }
+  return { ...describe(graph, nodeIds), startOffset: nearest(graph, waypoints[0]).meters, drawn: true };
 }

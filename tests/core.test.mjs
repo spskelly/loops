@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { distance, destination, resample, elevationGain, equivalentDistance, toGPX, reverseRoute, startingDirection } from '../src/geo.js';
-import { walkable, buildGraph, shortestPaths, generateLoops, rerouteSection, jaccard } from '../src/routing.js';
+import { walkable, buildGraph, shortestPaths, generateLoops, rerouteSection, traceRoute, jaccard } from '../src/routing.js';
 import { currentLocation } from '../src/location.js';
 import { decodeTerrarium, mercatorPixel } from '../src/services.js';
 
@@ -202,4 +202,24 @@ test('location diagnostics distinguish app deadlines, permission prompts, and na
   assert.ok(events.some(e => e.event === 'position-received' && e.accuracyMeters === 15));
   assert.ok(!JSON.stringify(events).includes('-71.07004'));
   assert.ok(!JSON.stringify(events).includes('42.35409'));
+});
+test('drawn routes snap waypoints to the graph and connect them with walking paths', () => {
+  const elements = grid(), graph = buildGraph(elements);
+  const waypoints = [[0, 0], [.0031, .0002], [.0029, .0031], [.0002, .0028]];
+  const route = traceRoute(elements, waypoints);
+  assert.deepEqual(route.coords[0], [0, 0]);
+  assert.deepEqual(route.coords.at(-1), route.coords[0]);
+  for (const point of waypoints) assert.ok(route.coords.some(p => distance(p, point) < 50));
+  for (let i = 1; i < route.nodeIds.length; i++) assert.ok(graph.adjacency.get(route.nodeIds[i - 1]).some(e => e.to === route.nodeIds[i]));
+  const measured = route.coords.slice(1).reduce((sum, p, i) => sum + distance(route.coords[i], p), 0);
+  assert.ok(Math.abs(measured - route.length) < .001);
+  assert.ok(route.length > 1000 && route.length < 1500);
+  assert.equal(route.overlap, 0);
+  assert.equal(route.reversible, true);
+  assert.equal(route.gain, null);
+  assert.equal(route.drawn, true);
+  assert.ok(route.edgeKeys.length > 0);
+  assert.throws(() => traceRoute(elements, [[0, 0], [10, 10]]), /Point 2/);
+  assert.throws(() => traceRoute(elements, [[0, 0]]), /at least one/);
+  assert.throws(() => traceRoute(elements, [[0, 0], [.00001, 0]]), /at least one/);
 });
