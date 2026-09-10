@@ -141,6 +141,25 @@ try {
   assert.ok((await page.locator('#status').textContent()).includes('Next-walk effort applied'));
   await page.locator('[data-unit="km"]').click(); assert.equal(await page.locator('#distance-unit').textContent(), 'kilometers');
   await page.locator('#history-open').click(); assert.equal(await page.locator('.history-item').count(), 1);
+  // Saved walks keep their route and get an editable name.
+  await page.locator('.walk-name').fill('Tuesday loop'); await page.locator('.walk-name').press('Enter'); await page.locator('.walk-name').blur();
+  await page.waitForFunction(() => document.getElementById('toast').textContent.includes('renamed'));
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.locator('[data-unit="km"]').click();
+  await page.locator('#history-open').click();
+  assert.equal(await page.locator('.walk-name').inputValue(), 'Tuesday loop');
+  await page.screenshot({ path: '.artifacts/history-dialog.png' });
+  await page.locator('[data-show]').click();
+  await page.waitForFunction(() => !document.getElementById('history-dialog').open && !document.getElementById('results').hidden);
+  assert.equal(await page.locator('.route-card').count(), 1);
+  assert.ok((await page.locator('.route-card').innerText()).includes('WALKED'));
+  assert.equal(await page.locator('.detail-heading h2').textContent(), 'Tuesday loop');
+  assert.equal(await page.locator('#complete').isDisabled(), true);
+  const shownCoords = await selectedCoords();
+  assert.deepEqual(shownCoords[0], shownCoords.at(-1));
+  assert.deepEqual(shownCoords, beforeReverse);
+  console.log('PASS: saved walks remember their route, can be renamed, and reappear on the map after reload');
+  await page.locator('#history-open').click();
   await page.locator('[data-delete]').click(); await page.waitForFunction(() => document.getElementById('history-count').textContent === '0');
   await page.locator('#history-close').click();
   await page.locator('#address').fill('Test park'); await page.locator('#search').click(); await page.locator('#places button').first().waitFor();
