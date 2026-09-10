@@ -145,7 +145,7 @@ async function findLoops(event) {
 function renderRoutes() {
   $('results').hidden = !state.routes.length;
   $('route-count').textContent = `${state.routes.length} ${state.routes.length === 1 ? 'possibility' : 'possibilities'}`;
-  $('route-list').innerHTML = state.routes.map((route, i) => `<button type="button" class="route-card" data-route="${i}" aria-pressed="${i === state.selected}" style="--route-color:${colors[i]}"><span class="route-top"><span class="route-dot"></span><strong>${escape(route.name)}</strong><small>${route.drawn ? 'YOUR ROUTE' : i === 0 ? 'BEST FIT' : 'ALTERNATIVE'}</small></span><span class="route-stats"><span>${formatDistance(route.length)}</span><span>↗ ${formatGain(route.gain)}</span><span>~${minutes(route)} min</span></span></button>`).join('');
+  $('route-list').innerHTML = state.routes.map((route, i) => `<button type="button" class="route-card" data-route="${i}" aria-pressed="${i === state.selected}" style="--route-color:${colors[i]}"><span class="route-top"><span class="route-dot"></span><strong>${escape(route.name)}</strong><small>${state.walks.some(w => w.routeId === route.id) ? 'WALKED' : route.drawn ? 'YOUR ROUTE' : i === 0 ? 'BEST FIT' : 'ALTERNATIVE'}</small></span><span class="route-stats"><span>${formatDistance(route.length)}</span><span>↗ ${formatGain(route.gain)}</span><span>~${minutes(route)} min</span></span></button>`).join('');
   $('route-list').querySelectorAll('button').forEach(b => b.onclick = () => selectRoute(Number(b.dataset.route), true));
 }
 function profileSVG(route) {
@@ -183,7 +183,8 @@ function selectRoute(index, fit = false) {
   $('complete').onclick = async () => {
     $('complete').disabled = true;
     try {
-      await saveWalk({ id: crypto.randomUUID(), routeId: route.id, name: route.name, placeName: route.placeName, length: route.length, gain: route.gain, completedAt: Date.now(), equivalent: equivalentDistance(route.length, route.gain) });
+      const { previous, ...snapshot } = route;
+      await saveWalk({ id: crypto.randomUUID(), routeId: route.id, name: route.name, placeName: route.placeName, length: route.length, gain: route.gain, completedAt: Date.now(), equivalent: equivalentDistance(route.length, route.gain), origin: state.origin, route: snapshot });
       await loadHistory(); selectRoute(state.selected); toast('A little more outside. Walk saved.');
     } catch { $('complete').disabled = false; toast('Could not save this walk. Browser storage may be unavailable.'); }
   };
@@ -215,13 +216,15 @@ function showEditPoint(coord, edgeIndex = state.pendingEdge) {
   if (route && edgeIndex !== null) state.map.getSource('edit-preview')?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [route.coords[edgeIndex], coord, route.coords[edgeIndex + 1]] } });
 }
 async function editRoute(edgeIndex, destination) {
-  if (state.busy || !state.graph) return;
+  if (state.busy) return;
   const index = state.selected, route = state.routes[index]; if (!route) return;
   cancelLocation(); resetRouteEditor();
   const controller = new AbortController(); state.controller = controller;
   busy(true); $('edit-hint').textContent = 'Finding a walking detour…'; status('Rerouting around that segment…');
   try {
     const { previous, ...snapshot } = route;
+    if (!state.graph) { status('Gathering nearby paths…'); state.graph = await fetchGraph(state.origin, route.length, controller.signal); }
+    if (controller.signal.aborted) return;
     let updated = await calculateDetour(state.graph, snapshot, edgeIndex, destination, controller.signal);
     if (controller.signal.aborted) return;
     $('edit-hint').textContent = 'Checking the new distance and hills…';
@@ -385,11 +388,30 @@ async function loadHistory() {
 }
 function renderHistory() {
   $('clear-history').hidden = !state.walks.length;
-  $('history-list').innerHTML = state.walks.length ? state.walks.map(w => `<div class="history-item"><div><strong>${escape(w.placeName || w.name)}</strong><small>${new Date(w.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${formatDistance(w.length)} · ${formatGain(w.gain)} climbing</small></div><button class="text-button" data-delete="${escape(w.id)}" aria-label="Remove walk from ${escape(new Date(w.completedAt).toLocaleDateString())}">Remove</button></div>`).join('') : '<div class="empty-history">Your next little adventure starts here.<br>Find a loop, head outside, then mark it complete.</div>';
+  $('history-list').innerHTML = state.walks.length ? state.walks.map(w => `<div class="history-item"><div class="history-main"><input class="walk-name" value="${escape(w.name)}" maxlength="80" aria-label="Walk name" data-rename="${escape(w.id)}"><small>${w.placeName ? `${escape(w.placeName)} · ` : ''}${new Date(w.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} · ${formatDistance(w.length)} · ${formatGain(w.gain)} climbing</small></div><span class="history-actions">${w.route ? `<button class="text-button" data-show="${escape(w.id)}">Show on map</button>` : ''}<button class="text-button" data-delete="${escape(w.id)}" aria-label="Remove walk from ${escape(new Date(w.completedAt).toLocaleDateString())}">Remove</button></span></div>`).join('') : '<div class="empty-history">Your next little adventure starts here.<br>Find a loop, head outside, then mark it complete.</div>';
+  $('history-list').querySelectorAll('[data-rename]').forEach(input => input.onchange = async () => {
+    const walk = state.walks.find(w => w.id === input.dataset.rename), name = input.value.trim();
+    if (!walk || !name) { input.value = walk?.name || ''; return; }
+    try {
+      await saveWalk({ ...walk, name }); walk.name = name;
+      const shown = state.routes.find(r => r.id === walk.routeId); if (shown) { shown.name = name; selectRoute(state.selected); }
+      toast('Walk renamed.');
+    } catch { input.value = walk.name; toast('Could not rename this walk.'); }
+  });
+  $('history-list').querySelectorAll('[data-show]').forEach(b => b.onclick = () => showWalk(state.walks.find(w => w.id === b.dataset.show)));
   $('history-list').querySelectorAll('[data-delete]').forEach(b => b.onclick = async () => {
     try { await deleteWalk(b.dataset.delete); await loadHistory(); if (state.routes.length) selectRoute(state.selected); }
     catch { toast('Could not remove this walk.'); }
   });
+}
+function showWalk(walk) {
+  if (!walk?.route || state.busy) return;
+  $('history-dialog').close();
+  setPlace({ coord: walk.origin || walk.route.coords[0], name: walk.placeName || walk.name });
+  state.graph = null;
+  state.routes = [{ ...walk.route, name: walk.name, id: walk.routeId, placeName: walk.placeName }];
+  state.selected = 0; renderRoutes(); selectRoute(0, true);
+  status(`Showing your walk from ${new Date(walk.completedAt).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}.`);
 }
 function renderNextWalk() {
   const recent = state.walks[0];
